@@ -39,7 +39,7 @@ Inicialmente, o horário será fixado no código. Posteriormente, ele poderá se
 
 O diagrama abaixo apresenta a arquitetura inicial do sistema, incluindo os componentes físicos, a comunicação Wi-Fi, o broker MQTT, o gateway Node.js, o banco de dados Redis e o painel web.
 
-![Diagrama da arquitetura IoT do despertador inteligente](docs/diagrama-arquitetura.png)
+![Diagrama da arquitetura IoT do despertador inteligente](docs/diagrama_inicial.png)
 
 ## Componentes
 
