@@ -7,20 +7,23 @@
 // WIFI
 // =====================================================
 
-const char *ssid = "wifi-labs-ifmg";
-const char *senha = "SENHA AQUI";
+const char *ssid = "SEU_WIFI";
+const char *senha = "SUA_SENHA_WIFI";
 
 // =====================================================
 // MQTT - HIVEMQ CLOUD
 // =====================================================
 
 const char *broker =
-    "543ccac868094f998ea646be2761494b.s1.eu.hivemq.cloud";
+    "SEU_BROKER.s1.eu.hivemq.cloud";
 
 const int portaMQTT = 8883;
 
-const char *usuarioMQTT = "esp32";
-const char *senhaMQTT = "SENHA AQUI";
+const char *usuarioMQTT =
+    "SEU_USUARIO";
+
+const char *senhaMQTT =
+    "SUA_SENHA_MQTT";
 
 // =====================================================
 // TOPICOS MQTT
@@ -51,95 +54,95 @@ const int PINO_BUZZER = 12;
 // =====================================================
 
 WiFiClientSecure wifiClient;
-PubSubClient mqtt(wifiClient);
+
+PubSubClient mqtt(
+    wifiClient);
 
 // =====================================================
 // ESTADOS
 // =====================================================
 
-// Indica se o buzzer está tocando
 bool alarmeAtivo = false;
 
-// Indica se estamos no modo automático
 bool modoAutomatico = false;
 
-// Indica se o despertador está na pausa
-// provocada pela detecção de movimento
 bool pausaPorMovimento = false;
 
-// Estado anterior do PIR
-int movimentoAnterior = LOW;
-
-// Estado anterior do Wi-Fi
 bool wifiEstavaConectado = false;
+
+int movimentoAnterior = LOW;
 
 // =====================================================
 // TEMPORIZADORES
 // =====================================================
 
 unsigned long ultimaTentativaMQTT = 0;
+
 unsigned long ultimaTelemetria = 0;
 
 unsigned long inicioPausaMovimento = 0;
 
-const unsigned long INTERVALO_MQTT = 5000;
+const unsigned long INTERVALO_MQTT =
+    5000;
 
-const unsigned long INTERVALO_TELEMETRIA = 10000;
+const unsigned long INTERVALO_TELEMETRIA =
+    10000;
 
-// 10 segundos
+// 5 minutos
 const unsigned long TEMPO_PAUSA_MOVIMENTO =
-    10UL * 1000UL;
+    5UL * 60UL * 1000UL;
 
 // =====================================================
-// DIAGNOSTICO WIFI
+// DIAGNOSTICO
 // =====================================================
 
 void mostrarDiagnostico()
 {
     Serial.println();
-    Serial.println("======= DIAGNOSTICO DE REDE =======");
+    Serial.println(
+        "======= DIAGNOSTICO DE REDE =======");
 
-    Serial.println("Status: CONECTADO");
+    Serial.println(
+        "Status: CONECTADO");
 
     Serial.print("SSID: ");
-    Serial.println(WiFi.SSID());
+    Serial.println(
+        WiFi.SSID());
 
     Serial.print("IP: ");
-    Serial.println(WiFi.localIP());
+    Serial.println(
+        WiFi.localIP());
 
     Serial.print("Gateway: ");
-    Serial.println(WiFi.gatewayIP());
+    Serial.println(
+        WiFi.gatewayIP());
 
     Serial.print("RSSI: ");
-    Serial.print(WiFi.RSSI());
+    Serial.print(
+        WiFi.RSSI());
+
     Serial.println(" dBm");
 
-    Serial.println("===================================");
+    Serial.println(
+        "===================================");
 }
 
 // =====================================================
-// ATIVAR ALARME
+// BUZZER
 // =====================================================
 
 void ativarAlarme()
 {
     alarmeAtivo = true;
 
-    uint32_t frequencia =
-        ledcWriteTone(
-            PINO_BUZZER,
-            440);
+    ledcWriteTone(
+        PINO_BUZZER,
+        440);
 
     Serial.println();
-    Serial.println("ALARME ATIVADO!");
-
-    Serial.print("Frequencia do buzzer: ");
-    Serial.println(frequencia);
+    Serial.println(
+        "ALARME ATIVADO!");
 }
-
-// =====================================================
-// DESATIVAR ALARME
-// =====================================================
 
 void desativarAlarme()
 {
@@ -150,11 +153,12 @@ void desativarAlarme()
         0);
 
     Serial.println();
-    Serial.println("ALARME DESATIVADO!");
+    Serial.println(
+        "ALARME DESATIVADO!");
 }
 
 // =====================================================
-// ATIVAR MODO AUTOMATICO
+// MODO AUTOMATICO
 // =====================================================
 
 void ativarModoAutomatico()
@@ -164,29 +168,10 @@ void ativarModoAutomatico()
     pausaPorMovimento = false;
 
     Serial.println();
-    Serial.println("===============================");
-    Serial.println("MODO AUTOMATICO ATIVADO!");
-    Serial.println("===============================");
-
-    // Ao entrar no modo automático,
-    // o alarme começa tocando
-    ativarAlarme();
-}
-
-// =====================================================
-// DESATIVAR MODO AUTOMATICO
-// =====================================================
-
-void desativarModoAutomatico()
-{
-    modoAutomatico = false;
-
-    pausaPorMovimento = false;
-
-    desativarAlarme();
-
     Serial.println(
-        "Modo automatico desativado.");
+        "MODO AUTOMATICO ATIVADO!");
+
+    ativarAlarme();
 }
 
 // =====================================================
@@ -221,15 +206,19 @@ void publicarEstado()
         topicoEstado,
         mensagem.c_str());
 
-    Serial.print("Estado enviado: ");
-    Serial.println(mensagem);
+    Serial.print(
+        "Estado enviado: ");
+
+    Serial.println(
+        mensagem);
 }
 
 // =====================================================
-// PUBLICAR TELEMETRIA
+// TELEMETRIA
 // =====================================================
 
-void publicarTelemetria(int movimento)
+void publicarTelemetria(
+    int movimento)
 {
     if (!mqtt.connected())
     {
@@ -242,10 +231,12 @@ void publicarTelemetria(int movimento)
         movimento == HIGH;
 
     json["ledVerde"] =
-        digitalRead(LED_VERDE) == HIGH;
+        digitalRead(
+            LED_VERDE) == HIGH;
 
     json["ledVermelho"] =
-        digitalRead(LED_VERMELHO) == HIGH;
+        digitalRead(
+            LED_VERMELHO) == HIGH;
 
     json["alarmeAtivo"] =
         alarmeAtivo;
@@ -269,12 +260,15 @@ void publicarTelemetria(int movimento)
         topicoTelemetria,
         mensagem.c_str());
 
-    Serial.print("Telemetria: ");
-    Serial.println(mensagem);
+    Serial.print(
+        "Telemetria: ");
+
+    Serial.println(
+        mensagem);
 }
 
 // =====================================================
-// RECEBER COMANDO MQTT
+// RECEBER MQTT
 // =====================================================
 
 void receberMensagem(
@@ -302,19 +296,22 @@ void receberMensagem(
         json["comando"] | "";
 
     Serial.println();
-    Serial.print("Comando recebido: ");
-    Serial.println(comando);
 
-    // =================================================
-    // LIGAR ALARME MANUALMENTE
-    // =================================================
+    Serial.print(
+        "Comando recebido: ");
+
+    Serial.println(
+        comando);
+
+    // ---------------------------------------------
+    // LIGAR MANUALMENTE
+    // ---------------------------------------------
 
     if (
         strcmp(
             comando,
             "ligar_alarme") == 0)
     {
-        // Sai do modo automático
         modoAutomatico = false;
 
         pausaPorMovimento = false;
@@ -324,9 +321,9 @@ void receberMensagem(
         publicarEstado();
     }
 
-    // =================================================
-    // DESLIGAR ALARME
-    // =================================================
+    // ---------------------------------------------
+    // DESLIGAR
+    // ---------------------------------------------
 
     else if (
         strcmp(
@@ -342,9 +339,9 @@ void receberMensagem(
         publicarEstado();
     }
 
-    // =================================================
-    // MODO AUTOMATICO
-    // =================================================
+    // ---------------------------------------------
+    // AUTOMATICO
+    // ---------------------------------------------
 
     else if (
         strcmp(
@@ -413,29 +410,17 @@ void setup()
 {
     Serial.begin(115200);
 
-    delay(1000);
-
-    Serial.println();
-    Serial.println(
-        "=====================================");
-
-    Serial.println(
-        "DESPERTADOR INTELIGENTE ESP32");
-
-    Serial.println(
-        "=====================================");
-
-    // =================================================
+    // ---------------------------------------------
     // PIR
-    // =================================================
+    // ---------------------------------------------
 
     pinMode(
         PINO_PIR,
         INPUT);
 
-    // =================================================
+    // ---------------------------------------------
     // LEDS
-    // =================================================
+    // ---------------------------------------------
 
     pinMode(
         LED_VERDE,
@@ -445,74 +430,30 @@ void setup()
         LED_VERMELHO,
         OUTPUT);
 
-    digitalWrite(
-        LED_VERDE,
-        LOW);
-
-    digitalWrite(
-        LED_VERMELHO,
-        LOW);
-
-    // =================================================
+    // ---------------------------------------------
     // BUZZER
-    // =================================================
+    // ---------------------------------------------
 
-    Serial.println();
-    Serial.println(
-        "Configurando buzzer...");
-
-    bool buzzerConfigurado =
-        ledcAttach(
-            PINO_BUZZER,
-            1000,
-            8);
-
-    if (buzzerConfigurado)
-    {
-        Serial.println(
-            "Buzzer configurado!");
-    }
-    else
-    {
-        Serial.println(
-            "ERRO ao configurar buzzer!");
-    }
-
-    // Buzzer começa desligado
-    ledcWriteTone(
+    ledcAttach(
         PINO_BUZZER,
-        0);
-
-    // =================================================
-    // TESTE RAPIDO DO BUZZER
-    // =================================================
-
-    Serial.println(
-        "Testando buzzer...");
-
-    ledcWriteTone(
-        PINO_BUZZER,
-        440);
-
-    delay(1000);
+        1000,
+        8);
 
     ledcWriteTone(
         PINO_BUZZER,
         0);
 
-    Serial.println(
-        "Teste finalizado.");
-
-    // =================================================
+    // ---------------------------------------------
     // ESTADO INICIAL DO PIR
-    // =================================================
+    // ---------------------------------------------
 
     movimentoAnterior =
-        digitalRead(PINO_PIR);
+        digitalRead(
+            PINO_PIR);
 
-    // =================================================
+    // ---------------------------------------------
     // WIFI
-    // =================================================
+    // ---------------------------------------------
 
     WiFi.mode(
         WIFI_STA);
@@ -526,17 +467,20 @@ void setup()
 
     Serial.println();
     Serial.println(
+        "=== DESPERTADOR INTELIGENTE ===");
+
+    Serial.println(
         "Conectando ao Wi-Fi...");
 
-    // =================================================
+    // ---------------------------------------------
     // TLS
-    // =================================================
+    // ---------------------------------------------
 
     wifiClient.setInsecure();
 
-    // =================================================
+    // ---------------------------------------------
     // MQTT
-    // =================================================
+    // ---------------------------------------------
 
     mqtt.setServer(
         broker,
@@ -569,7 +513,8 @@ void loop()
 
         mostrarDiagnostico();
 
-        wifiEstavaConectado = true;
+        wifiEstavaConectado =
+            true;
     }
 
     if (
@@ -580,10 +525,8 @@ void loop()
         Serial.println(
             "Wi-Fi desconectado!");
 
-        Serial.println(
-            "Aguardando reconexao...");
-
-        wifiEstavaConectado = false;
+        wifiEstavaConectado =
+            false;
     }
 
     // =================================================
@@ -606,21 +549,20 @@ void loop()
         }
     }
 
-    if (mqtt.connected())
+    if (
+        mqtt.connected())
     {
         mqtt.loop();
     }
 
     // =================================================
-    // SENSOR PIR
+    // PIR
     // =================================================
 
     int movimento =
         digitalRead(
             PINO_PIR);
 
-    // Verifica se aconteceu uma NOVA detecção
-    // LOW -> HIGH
     bool novoMovimento =
         movimento == HIGH &&
         movimentoAnterior == LOW;
@@ -629,9 +571,9 @@ void loop()
     // LEDS
     // =================================================
 
-    if (movimento == HIGH)
+    if (
+        movimento == HIGH)
     {
-        // Movimento
         digitalWrite(
             LED_VERDE,
             HIGH);
@@ -642,7 +584,6 @@ void loop()
     }
     else
     {
-        // Sem movimento
         digitalWrite(
             LED_VERDE,
             LOW);
@@ -653,34 +594,27 @@ void loop()
     }
 
     // =================================================
-    // LOGICA DO MODO AUTOMATICO
+    // MODO AUTOMATICO
     // =================================================
 
     if (modoAutomatico)
     {
-        // ---------------------------------------------
-        // DETECTOU MOVIMENTO
-        // ---------------------------------------------
-
+        // Detectou movimento
         if (
             novoMovimento &&
             !pausaPorMovimento)
         {
             Serial.println();
             Serial.println(
-                "MOVIMENTO DETECTADO!");
+                "Movimento detectado!");
 
             Serial.println(
-                "Pausando alarme por 5 minutos...");
+                "Alarme pausado por 5 minutos.");
 
-            // Para o buzzer
             desativarAlarme();
 
-            // IMPORTANTE:
-            // desativarAlarme() muda alarmeAtivo,
-            // mas NÃO desliga o modo automático.
-
-            pausaPorMovimento = true;
+            pausaPorMovimento =
+                true;
 
             inicioPausaMovimento =
                 millis();
@@ -688,18 +622,13 @@ void loop()
             publicarEstado();
         }
 
-        // ---------------------------------------------
-        // PAUSA ATIVA
-        // ---------------------------------------------
-
-        if (pausaPorMovimento)
+        // Verifica fim da pausa
+        if (
+            pausaPorMovimento)
         {
-            unsigned long tempoPassado =
-                millis() -
-                inicioPausaMovimento;
-
             if (
-                tempoPassado >=
+                millis() -
+                    inicioPausaMovimento >=
                 TEMPO_PAUSA_MOVIMENTO)
             {
                 pausaPorMovimento =
@@ -707,10 +636,7 @@ void loop()
 
                 Serial.println();
                 Serial.println(
-                    "Fim da pausa de 5 minutos!");
-
-                Serial.println(
-                    "Buzzer voltando a tocar...");
+                    "Fim da pausa.");
 
                 ativarAlarme();
 
@@ -720,7 +646,7 @@ void loop()
     }
 
     // =================================================
-    // TELEMETRIA QUANDO PIR MUDA
+    // TELEMETRIA POR MUDANCA
     // =================================================
 
     if (
@@ -730,8 +656,6 @@ void loop()
         publicarTelemetria(
             movimento);
 
-        // Atualizamos somente DEPOIS
-        // da lógica do modo automático
         movimentoAnterior =
             movimento;
     }
