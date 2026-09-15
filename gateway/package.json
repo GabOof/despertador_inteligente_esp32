@@ -1,0 +1,14 @@
+{
+    "name": "despertador-gateway",
+    "version": "1.0.0",
+    "description": "Gateway MQTT do Despertador Inteligente ESP32",
+    "main": "src/index.js",
+    "scripts": {
+        "start": "node src/index.js",
+        "dev": "node --watch src/index.js"
+    },
+    "dependencies": {
+        "dotenv": "^17.0.0",
+        "mqtt": "^5.0.0"
+    }
+}
