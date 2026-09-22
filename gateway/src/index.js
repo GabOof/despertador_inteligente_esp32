@@ -22,12 +22,6 @@ const clientId = process.env.MQTT_CLIENT_ID || "gateway-despertador";
 // TÓPICOS
 // =====================================================
 
-// O + representa qualquer dispositivo.
-//
-// Exemplo:
-// despertador/gab/esp32-01/telemetria
-// despertador/gab/esp32-02/telemetria
-
 const topicoTelemetria = "despertador/gab/+/telemetria";
 
 const topicoEstado = "despertador/gab/+/estado";
@@ -104,17 +98,6 @@ cliente.on("message", (topico, payload) => {
     // =============================================
 
     const partesTopico = topico.split("/");
-
-    /*
-            Exemplo:
-
-            despertador/gab/esp32-01/telemetria
-
-            [0] despertador
-            [1] gab
-            [2] esp32-01
-            [3] telemetria
-        */
 
     const dispositivo = partesTopico[2];
 
