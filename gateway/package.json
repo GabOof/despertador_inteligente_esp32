@@ -5,10 +5,12 @@
     "main": "src/index.js",
     "scripts": {
         "start": "node src/index.js",
-        "dev": "node --watch src/index.js"
+        "dev": "node --watch src/index.js",
+        "redis:query": "node scripts/consultarRedis.js"
     },
     "dependencies": {
         "dotenv": "^17.0.0",
-        "mqtt": "^5.0.0"
+        "mqtt": "^5.0.0",
+        "redis": "^6.2.1"
     }
 }
