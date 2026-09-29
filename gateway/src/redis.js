@@ -1,19 +1,15 @@
 const { createClient } = require("redis");
 
-// =====================================================
-// CLIENTE REDIS
-// =====================================================
-
 const redis = createClient({
     url: process.env.REDIS_URL,
 });
 
 // =====================================================
-// EVENTOS
+// EVENTOS REDIS
 // =====================================================
 
 redis.on("error", (erro) => {
-    console.error("Erro no Redis:", erro.message);
+    console.error("Erro Redis:", erro.message);
 });
 
 redis.on("reconnecting", () => {
@@ -21,7 +17,7 @@ redis.on("reconnecting", () => {
 });
 
 // =====================================================
-// CONECTAR
+// CONEXAO
 // =====================================================
 
 async function conectarRedis() {
@@ -34,15 +30,49 @@ async function conectarRedis() {
     console.log("Redis conectado com sucesso!");
 }
 
+async function desconectarRedis() {
+    if (!redis.isOpen) {
+        return;
+    }
+
+    await redis.quit();
+}
+
 // =====================================================
-// CONVERTER DADOS PARA HASH
+// CHAVES
+// =====================================================
+
+function criarChaves(deviceId) {
+    const prefixo = `iot:device:${deviceId}`;
+
+    return {
+        estado: `${prefixo}:state`,
+
+        telemetriaAtual: `${prefixo}:telemetry`,
+
+        historico: `${prefixo}:history`,
+
+        ultimoContato: `${prefixo}:lastSeen`,
+
+        presenca: `${prefixo}:presence`,
+
+        ultimoComando: `${prefixo}:lastCommand`,
+
+        comandos: `${prefixo}:commands`,
+
+        comando: (requestId) => `${prefixo}:command:${requestId}`,
+    };
+}
+
+// =====================================================
+// PREPARAR HASH
 // =====================================================
 
 function prepararHash(dados) {
     const resultado = {};
 
     for (const [chave, valor] of Object.entries(dados)) {
-        if (valor === null || valor === undefined) {
+        if (valor === undefined || valor === null) {
             continue;
         }
 
@@ -57,82 +87,177 @@ function prepararHash(dados) {
 }
 
 // =====================================================
-// NOMES DAS CHAVES
+// ULTIMO CONTATO
 // =====================================================
 
-function criarChaves(deviceId) {
-    const prefixo = `iot:device:${deviceId}`;
-
-    return {
-        estado: `${prefixo}:state`,
-
-        historico: `${prefixo}:history`,
-
-        ultimoContato: `${prefixo}:lastSeen`,
-
-        presenca: `${prefixo}:presence`,
-    };
-}
-
-// =====================================================
-// PERSISTIR MENSAGEM
-// =====================================================
-
-async function persistirMensagem(deviceId, tipo, dados) {
-    const agora = new Date().toISOString();
-
+async function atualizarContato(deviceId, horario) {
     const chaves = criarChaves(deviceId);
 
-    // ---------------------------------------------
-    // ESTADO ATUAL
-    // ---------------------------------------------
-
-    const estado = prepararHash({
-        ...dados,
-
-        tipoUltimaMensagem: tipo,
-
-        atualizadoEm: agora,
-    });
-
-    await redis.hSet(chaves.estado, estado);
-
-    // ---------------------------------------------
-    // ULTIMO CONTATO
-    // ---------------------------------------------
-
-    await redis.set(chaves.ultimoContato, agora);
-
-    // ---------------------------------------------
-    // PRESENCA
-    // ---------------------------------------------
+    await redis.set(chaves.ultimoContato, horario);
 
     await redis.set(chaves.presenca, "online", {
         EX: 30,
     });
-
-    // ---------------------------------------------
-    // HISTORICO
-    // ---------------------------------------------
-
-    if (tipo === "telemetria") {
-        const registro = {
-            deviceId,
-            recebidoEm: agora,
-            ...dados,
-        };
-
-        await redis.rPush(chaves.historico, JSON.stringify(registro));
-
-        // Mantém somente os últimos 100 registros
-        await redis.lTrim(chaves.historico, -100, -1);
-    }
-
-    console.log(`Dados persistidos no Redis: ${deviceId}`);
 }
 
 // =====================================================
-// CONSULTAR ESTADO
+// TELEMETRIA
+// =====================================================
+
+async function persistirTelemetria(deviceId, dados) {
+    const agora = new Date().toISOString();
+
+    const chaves = criarChaves(deviceId);
+
+    await redis.hSet(
+        chaves.telemetriaAtual,
+        prepararHash({
+            ...dados,
+            recebidoEm: agora,
+        })
+    );
+
+    const registro = {
+        deviceId,
+
+        recebidoEm: agora,
+
+        ...dados,
+    };
+
+    await redis.rPush(chaves.historico, JSON.stringify(registro));
+
+    await redis.lTrim(chaves.historico, -100, -1);
+
+    await atualizarContato(deviceId, agora);
+}
+
+// =====================================================
+// COMANDO ENVIADO
+// =====================================================
+
+async function registrarComandoEnviado(deviceId, requestId, comando, topico) {
+    const agora = new Date().toISOString();
+
+    const chaves = criarChaves(deviceId);
+
+    const registro = {
+        requestId,
+
+        comando,
+
+        status: "enviado",
+
+        enviadoEm: agora,
+
+        topico,
+    };
+
+    await redis.hSet(chaves.comando(requestId), prepararHash(registro));
+
+    await redis.hSet(chaves.ultimoComando, prepararHash(registro));
+
+    await redis.rPush(chaves.comandos, requestId);
+
+    await redis.lTrim(chaves.comandos, -50, -1);
+}
+
+// =====================================================
+// FALHA NA PUBLICACAO
+// =====================================================
+
+async function registrarFalhaComando(deviceId, requestId, erro) {
+    const agora = new Date().toISOString();
+
+    const chaves = criarChaves(deviceId);
+
+    const atualizacao = {
+        requestId,
+
+        status: "falha_publicacao",
+
+        erro,
+
+        falhouEm: agora,
+    };
+
+    await redis.hSet(chaves.comando(requestId), prepararHash(atualizacao));
+
+    await redis.hSet(chaves.ultimoComando, prepararHash(atualizacao));
+}
+
+// =====================================================
+// CONFIRMACAO DO ESP32
+// =====================================================
+
+async function persistirConfirmacaoEstado(deviceId, dados) {
+    const agora = new Date().toISOString();
+
+    const chaves = criarChaves(deviceId);
+
+    const estadoConfirmado = {
+        deviceId,
+
+        requestId: dados.requestId,
+
+        comando: dados.comando,
+
+        executado: dados.executado,
+
+        alarmeAtivo: dados.alarmeAtivo,
+
+        modoAutomatico: dados.modoAutomatico,
+
+        pausaMovimento: dados.pausaMovimento,
+
+        motivo: dados.motivo || "",
+
+        confirmadoEm: agora,
+    };
+
+    // Esta chave somente recebe
+    // estado publicado pelo ESP32.
+    await redis.hSet(chaves.estado, prepararHash(estadoConfirmado));
+
+    await atualizarContato(deviceId, agora);
+
+    const requestId = dados.requestId;
+
+    // Eventos internos nao sao
+    // comandos enviados pelo gateway.
+    if (requestId === "evento" || requestId === "startup" || requestId === "sem-id") {
+        return;
+    }
+
+    const status = dados.executado ? "confirmado" : "rejeitado";
+
+    const atualizacao = {
+        requestId,
+
+        comando: dados.comando,
+
+        status,
+
+        executado: dados.executado,
+
+        confirmadoEm: agora,
+
+        alarmeAtivo: dados.alarmeAtivo,
+
+        modoAutomatico: dados.modoAutomatico,
+
+        pausaMovimento: dados.pausaMovimento,
+
+        motivo: dados.motivo || "",
+    };
+
+    await redis.hSet(chaves.comando(requestId), prepararHash(atualizacao));
+
+    await redis.hSet(chaves.ultimoComando, prepararHash(atualizacao));
+}
+
+// =====================================================
+// CONSULTAS
 // =====================================================
 
 async function consultarEstado(deviceId) {
@@ -141,31 +266,25 @@ async function consultarEstado(deviceId) {
     return await redis.hGetAll(chaves.estado);
 }
 
-// =====================================================
-// CONSULTAR HISTORICO
-// =====================================================
-
-async function consultarHistorico(deviceId) {
+async function consultarTelemetriaAtual(deviceId) {
     const chaves = criarChaves(deviceId);
 
-    const registros = await redis.lRange(chaves.historico, 0, -1);
+    return await redis.hGetAll(chaves.telemetriaAtual);
+}
+
+async function consultarHistorico(deviceId, limite = 10) {
+    const chaves = criarChaves(deviceId);
+
+    const registros = await redis.lRange(chaves.historico, -Math.abs(limite), -1);
 
     return registros.map((item) => JSON.parse(item));
 }
-
-// =====================================================
-// CONSULTAR ULTIMO CONTATO
-// =====================================================
 
 async function consultarUltimoContato(deviceId) {
     const chaves = criarChaves(deviceId);
 
     return await redis.get(chaves.ultimoContato);
 }
-
-// =====================================================
-// CONSULTAR PRESENCA
-// =====================================================
 
 async function consultarPresenca(deviceId) {
     const chaves = criarChaves(deviceId);
@@ -175,15 +294,62 @@ async function consultarPresenca(deviceId) {
     return valor || "offline";
 }
 
+async function consultarUltimoComando(deviceId) {
+    const chaves = criarChaves(deviceId);
+
+    return await redis.hGetAll(chaves.ultimoComando);
+}
+
+async function consultarComando(deviceId, requestId) {
+    const chaves = criarChaves(deviceId);
+
+    return await redis.hGetAll(chaves.comando(requestId));
+}
+
+async function consultarComandos(deviceId, limite = 10) {
+    const chaves = criarChaves(deviceId);
+
+    const ids = await redis.lRange(chaves.comandos, -Math.abs(limite), -1);
+
+    const resultado = [];
+
+    for (const requestId of ids) {
+        resultado.push(await consultarComando(deviceId, requestId));
+    }
+
+    return resultado;
+}
+
 // =====================================================
 // EXPORTS
 // =====================================================
 
 module.exports = {
     conectarRedis,
-    persistirMensagem,
+
+    desconectarRedis,
+
+    persistirTelemetria,
+
+    registrarComandoEnviado,
+
+    registrarFalhaComando,
+
+    persistirConfirmacaoEstado,
+
     consultarEstado,
+
+    consultarTelemetriaAtual,
+
     consultarHistorico,
+
     consultarUltimoContato,
+
     consultarPresenca,
+
+    consultarUltimoComando,
+
+    consultarComando,
+
+    consultarComandos,
 };
