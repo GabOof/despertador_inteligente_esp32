@@ -1,34 +1,45 @@
 require("dotenv").config();
 
 const mqtt = require("mqtt");
+const readline = require("readline");
+const { randomUUID } = require("crypto");
 
 const { validarTelemetria, validarEstado } = require("./validator");
 
 const { registrarValida, registrarInvalida } = require("./logger");
 
-const { conectarRedis, persistirMensagem } = require("./redis");
+const {
+    conectarRedis,
+    desconectarRedis,
+    persistirTelemetria,
+    registrarComandoEnviado,
+    registrarFalhaComando,
+    persistirConfirmacaoEstado,
+} = require("./redis");
 
 // =====================================================
-// CONFIGURACAO MQTT
+// CONFIGURACAO
 // =====================================================
 
-const host = process.env.MQTT_HOST;
+const MQTT_HOST = process.env.MQTT_HOST;
 
-const porta = process.env.MQTT_PORT || 8883;
+const MQTT_PORT = Number(process.env.MQTT_PORT || 8883);
 
-const usuario = process.env.MQTT_USERNAME;
+const MQTT_USERNAME = process.env.MQTT_USERNAME;
 
-const senha = process.env.MQTT_PASSWORD;
+const MQTT_PASSWORD = process.env.MQTT_PASSWORD;
 
-const clientId = process.env.MQTT_CLIENT_ID || "gateway-despertador-gab";
+const MQTT_CLIENT_ID = process.env.MQTT_CLIENT_ID || "gateway-despertador-gab";
+
+const DEVICE_PADRAO = process.env.DEVICE_ID || "esp32-01";
 
 // =====================================================
-// TOPICOS MQTT
+// TOPICOS
 // =====================================================
 
-const topicoTelemetria = "despertador/gab/+/telemetria";
+const TOPICO_TELEMETRIA = "despertador/gab/+/telemetria";
 
-const topicoEstado = "despertador/gab/+/estado";
+const TOPICO_ESTADO = "despertador/gab/+/estado";
 
 // =====================================================
 // CLIENTE MQTT
@@ -36,25 +47,256 @@ const topicoEstado = "despertador/gab/+/estado";
 
 let clienteMQTT = null;
 
+let encerrando = false;
+
 // =====================================================
-// IDENTIFICAR DISPOSITIVO PELO TOPICO
+// TERMINAL
+// =====================================================
+
+const terminal = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    prompt: "> ",
+});
+
+// =====================================================
+// INTERPRETAR TOPICO
 // =====================================================
 
 function interpretarTopico(topico) {
     const partes = topico.split("/");
 
-    if (partes.length !== 4) {
-        return null;
-    }
-
-    if (partes[0] !== "despertador" || partes[1] !== "gab") {
+    if (partes.length !== 4 || partes[0] !== "despertador" || partes[1] !== "gab") {
         return null;
     }
 
     return {
         dispositivo: partes[2],
+
         tipo: partes[3],
     };
+}
+
+// =====================================================
+// CRIAR TOPICO DE COMANDO
+// =====================================================
+
+function criarTopicoComando(deviceId) {
+    return `despertador/gab/` + `${deviceId}/comando`;
+}
+
+// =====================================================
+// MENU
+// =====================================================
+
+function mostrarMenu() {
+    console.log();
+    console.log("Comandos: ligar | desligar | automatico | menu | sair");
+    console.log();
+
+    terminal.prompt();
+}
+
+// =====================================================
+// PUBLICAR COMANDO
+// =====================================================
+
+async function publicarComando(deviceId, comando) {
+    const comandosAceitos = ["ligar_alarme", "desligar_alarme", "automatico"];
+
+    if (!comandosAceitos.includes(comando)) {
+        console.log("[ERRO] Comando nao suportado");
+
+        terminal.prompt();
+
+        return;
+    }
+
+    if (!clienteMQTT || !clienteMQTT.connected) {
+        console.log("[ERRO] MQTT desconectado");
+
+        terminal.prompt();
+
+        return;
+    }
+
+    const requestId = `cmd-${randomUUID()}`;
+
+    const topico = criarTopicoComando(deviceId);
+
+    const mensagem = {
+        requestId,
+        comando,
+    };
+
+    const payload = JSON.stringify(mensagem);
+
+    // Primeiro registra no Redis
+    // como "enviado".
+    await registrarComandoEnviado(deviceId, requestId, comando, topico);
+
+    try {
+        await new Promise((resolve, reject) => {
+            clienteMQTT.publish(
+                topico,
+                payload,
+                {
+                    qos: 1,
+                    retain: false,
+                },
+                (erro) => {
+                    if (erro) {
+                        reject(erro);
+
+                        return;
+                    }
+
+                    resolve();
+                }
+            );
+        });
+
+        console.log();
+
+        console.log(`[ENVIO] ${deviceId}`);
+
+        console.log(`  comando: ${comando}`);
+
+        console.log("  status: enviado");
+
+        console.log(`  requestId: ${requestId}`);
+
+        console.log("  aguardando confirmacao...");
+
+        console.log();
+    } catch (erro) {
+        await registrarFalhaComando(deviceId, requestId, erro.message);
+
+        console.log();
+
+        console.log(`[ERRO] Falha ao publicar ${comando}`);
+
+        console.log(`  ${erro.message}`);
+
+        console.log();
+    }
+
+    terminal.prompt();
+}
+
+// =====================================================
+// PROCESSAR TELEMETRIA
+// =====================================================
+
+async function processarTelemetria(dispositivo, topico, dados) {
+    const resultado = validarTelemetria(dados);
+
+    if (!resultado.valido) {
+        registrarInvalida({
+            timestamp: new Date().toISOString(),
+
+            dispositivo,
+            topico,
+            tipo: "telemetria",
+            dados,
+
+            erros: resultado.erros,
+        });
+
+        console.log(`[ERRO] Telemetria invalida de ${dispositivo}`);
+
+        return;
+    }
+
+    registrarValida({
+        timestamp: new Date().toISOString(),
+
+        dispositivo,
+        topico,
+        tipo: "telemetria",
+
+        dados,
+    });
+
+    await persistirTelemetria(dispositivo, dados);
+
+    // Mantemos somente uma mensagem curta.
+    console.log(`[TELEMETRIA] ${dispositivo} -> Redis atualizado`);
+}
+
+// =====================================================
+// PROCESSAR CONFIRMACAO
+// =====================================================
+
+async function processarEstado(dispositivo, topico, dados) {
+    const resultado = validarEstado(dados);
+
+    if (!resultado.valido) {
+        registrarInvalida({
+            timestamp: new Date().toISOString(),
+
+            dispositivo,
+            topico,
+            tipo: "estado",
+
+            dados,
+
+            erros: resultado.erros,
+        });
+
+        /*
+            Não poluímos o terminal
+            mostrando todos os campos.
+
+            Apenas avisamos resumidamente.
+        */
+
+        console.log(`[IGNORADO] Estado antigo/invalido de ${dispositivo}`);
+
+        return;
+    }
+
+    registrarValida({
+        timestamp: new Date().toISOString(),
+
+        dispositivo,
+        topico,
+        tipo: "estado",
+
+        dados,
+    });
+
+    await persistirConfirmacaoEstado(dispositivo, dados);
+
+    // Eventos internos do modo automatico
+    // não são comandos enviados pelo Gateway.
+    if (
+        dados.requestId === "evento" ||
+        dados.requestId === "startup" ||
+        dados.requestId === "sem-id"
+    ) {
+        return;
+    }
+
+    console.log();
+
+    console.log(`[CONFIRMACAO] ${dispositivo}`);
+
+    console.log(`  comando: ${dados.comando}`);
+
+    console.log(`  executado: ${dados.executado ? "sim" : "nao"}`);
+
+    console.log(`  alarme: ${dados.alarmeAtivo ? "ligado" : "desligado"}`);
+
+    console.log("  Redis: atualizado");
+
+    console.log(`  status: ${dados.executado ? "confirmado" : "rejeitado"}`);
+
+    console.log(`  requestId: ${dados.requestId}`);
+
+    console.log();
+
+    terminal.prompt();
 }
 
 // =====================================================
@@ -62,364 +304,240 @@ function interpretarTopico(topico) {
 // =====================================================
 
 async function processarMensagem(topico, payload) {
-    const mensagem = payload.toString();
+    const informacoes = interpretarTopico(topico);
 
-    console.log();
-    console.log("========================================");
-
-    console.log("NOVA MENSAGEM MQTT");
-
-    console.log("========================================");
-
-    console.log("Topico:", topico);
-
-    console.log("Payload:", mensagem);
-
-    // =================================================
-    // IDENTIFICAR DISPOSITIVO
-    // =================================================
-
-    const informacoesTopico = interpretarTopico(topico);
-
-    if (!informacoesTopico) {
-        console.log();
-        console.error("❌ TOPICO INVALIDO");
-
-        registrarInvalida({
-            timestamp: new Date().toISOString(),
-
-            topico,
-
-            mensagem,
-
-            erros: ["Estrutura de topico invalida"],
-        });
+    if (!informacoes) {
+        console.log(`[ERRO] Topico invalido: ${topico}`);
 
         return;
     }
 
-    const { dispositivo, tipo } = informacoesTopico;
-
-    console.log("Dispositivo:", dispositivo);
-
-    console.log("Tipo:", tipo);
-
-    // =================================================
-    // INTERPRETAR JSON
-    // =================================================
+    const { dispositivo, tipo } = informacoes;
 
     let dados;
 
     try {
-        dados = JSON.parse(mensagem);
+        dados = JSON.parse(payload.toString());
     } catch (erro) {
-        console.log();
-        console.error("❌ JSON INVALIDO");
-
-        console.error(erro.message);
-
         registrarInvalida({
             timestamp: new Date().toISOString(),
 
             dispositivo,
-
             topico,
-
             tipo,
 
-            mensagem,
+            mensagem: payload.toString(),
 
             erros: ["JSON invalido"],
         });
 
+        console.log(`[ERRO] JSON invalido de ${dispositivo}`);
+
         return;
     }
 
     // =================================================
-    // VALIDAR MENSAGEM
+    // TELEMETRIA
     // =================================================
-
-    let resultado;
 
     if (tipo === "telemetria") {
-        resultado = validarTelemetria(dados);
-    } else if (tipo === "estado") {
-        resultado = validarEstado(dados);
-    } else {
-        resultado = {
-            valido: false,
-
-            erros: ["Tipo de mensagem desconhecido"],
-        };
-    }
-
-    // =================================================
-    // MENSAGEM INVALIDA
-    // =================================================
-
-    if (!resultado.valido) {
-        console.log();
-
-        console.error("❌ MENSAGEM INVALIDA");
-
-        resultado.erros.forEach((erro) => {
-            console.error(`- ${erro}`);
-        });
-
-        registrarInvalida({
-            timestamp: new Date().toISOString(),
-
-            dispositivo,
-
-            topico,
-
-            tipo,
-
-            dados,
-
-            erros: resultado.erros,
-        });
+        await processarTelemetria(dispositivo, topico, dados);
 
         return;
     }
 
     // =================================================
-    // MENSAGEM VALIDA
+    // CONFIRMACAO
     // =================================================
 
-    console.log();
-
-    console.log("✅ MENSAGEM VALIDA");
-
-    console.log("Dados interpretados:");
-
-    console.log(dados);
-
-    // =================================================
-    // REGISTRAR LOG
-    // =================================================
-
-    registrarValida({
-        timestamp: new Date().toISOString(),
-
-        dispositivo,
-
-        topico,
-
-        tipo,
-
-        dados,
-    });
-
-    // =================================================
-    // PERSISTIR NO REDIS
-    // =================================================
-
-    try {
-        await persistirMensagem(dispositivo, tipo, dados);
-
-        console.log();
-
-        console.log("✅ Mensagem persistida no Redis");
-    } catch (erro) {
-        console.log();
-
-        console.error("❌ Erro ao persistir no Redis:");
-
-        console.error(erro.message);
+    if (tipo === "estado") {
+        await processarEstado(dispositivo, topico, dados);
     }
 }
 
 // =====================================================
-// CONECTAR AO MQTT
+// CONECTAR MQTT
 // =====================================================
 
 function conectarMQTT() {
-    console.log();
+    clienteMQTT = mqtt.connect(`mqtts://${MQTT_HOST}:${MQTT_PORT}`, {
+        username: MQTT_USERNAME,
 
-    console.log("Iniciando conexao MQTT...");
+        password: MQTT_PASSWORD,
 
-    console.log(`Broker: ${host}:${porta}`);
+        clientId: MQTT_CLIENT_ID,
 
-    clienteMQTT = mqtt.connect(`mqtts://${host}:${porta}`, {
-        username: usuario,
-
-        password: senha,
-
-        clientId: clientId,
-
-        // Valida o certificado TLS
         rejectUnauthorized: true,
 
-        // Tenta reconectar a cada 5 segundos
         reconnectPeriod: 5000,
 
-        // Timeout
         connectTimeout: 10000,
 
         clean: true,
     });
 
     // =================================================
-    // MQTT CONECTADO
+    // CONECTADO
     // =================================================
 
     clienteMQTT.on("connect", () => {
-        console.log();
-
-        console.log("========================================");
-
-        console.log("GATEWAY MQTT CONECTADO!");
-
-        console.log("========================================");
-
-        // -----------------------------------------
-        // ASSINAR TOPICOS
-        // -----------------------------------------
+        console.log("[OK] MQTT conectado");
 
         clienteMQTT.subscribe(
-            [topicoTelemetria, topicoEstado],
+            [TOPICO_TELEMETRIA, TOPICO_ESTADO],
             {
-                qos: 0,
+                qos: 1,
             },
             (erro) => {
                 if (erro) {
-                    console.error("Erro ao assinar topicos:");
-
-                    console.error(erro.message);
+                    console.log(`[ERRO] Assinatura MQTT: ${erro.message}`);
 
                     return;
                 }
 
-                console.log();
+                console.log(`[OK] Aguardando ${DEVICE_PADRAO}`);
 
-                console.log("Topicos assinados:");
-
-                console.log(`- ${topicoTelemetria}`);
-
-                console.log(`- ${topicoEstado}`);
-
-                console.log();
-
-                console.log("Aguardando mensagens...");
+                mostrarMenu();
             }
         );
     });
 
     // =================================================
-    // MENSAGEM RECEBIDA
+    // MENSAGEM
     // =================================================
 
     clienteMQTT.on("message", async (topico, payload) => {
         try {
             await processarMensagem(topico, payload);
         } catch (erro) {
-            console.error();
-
-            console.error("Erro inesperado ao processar mensagem:");
-
-            console.error(erro.message);
+            console.log(`[ERRO] Processamento: ${erro.message}`);
         }
     });
 
     // =================================================
-    // RECONEXAO MQTT
+    // RECONEXAO
     // =================================================
 
     clienteMQTT.on("reconnect", () => {
-        console.log();
-
-        console.log("Tentando reconectar ao broker MQTT...");
+        console.log("[MQTT] Reconectando...");
     });
 
     // =================================================
-    // MQTT OFFLINE
+    // OFFLINE
     // =================================================
 
     clienteMQTT.on("offline", () => {
-        console.log();
-
-        console.log("Gateway MQTT offline.");
+        console.log("[MQTT] Offline");
     });
 
     // =================================================
-    // CONEXAO MQTT FECHADA
-    // =================================================
-
-    clienteMQTT.on("close", () => {
-        console.log("Conexao MQTT encerrada.");
-    });
-
-    // =================================================
-    // ERRO MQTT
+    // ERRO
     // =================================================
 
     clienteMQTT.on("error", (erro) => {
-        console.error();
-
-        console.error("Erro MQTT:");
-
-        console.error(erro.message);
+        console.log(`[ERRO] MQTT: ${erro.message}`);
     });
 }
 
 // =====================================================
-// INICIAR GATEWAY
+// TERMINAL
+// =====================================================
+
+terminal.on("line", async (entrada) => {
+    const comando = entrada.trim().toLowerCase();
+
+    if (comando === "") {
+        terminal.prompt();
+
+        return;
+    }
+
+    if (comando === "ligar") {
+        await publicarComando(DEVICE_PADRAO, "ligar_alarme");
+
+        return;
+    }
+
+    if (comando === "desligar") {
+        await publicarComando(DEVICE_PADRAO, "desligar_alarme");
+
+        return;
+    }
+
+    if (comando === "automatico") {
+        await publicarComando(DEVICE_PADRAO, "automatico");
+
+        return;
+    }
+
+    if (comando === "menu") {
+        mostrarMenu();
+
+        return;
+    }
+
+    if (comando === "sair") {
+        await encerrarGateway();
+
+        return;
+    }
+
+    console.log("[ERRO] Comando desconhecido");
+
+    mostrarMenu();
+});
+
+// =====================================================
+// INICIAR
 // =====================================================
 
 async function iniciarGateway() {
+    console.clear();
+
+    console.log("Despertador Inteligente - Gateway");
+
     console.log();
 
-    console.log("========================================");
-
-    console.log("DESPERTADOR INTELIGENTE - GATEWAY");
-
-    console.log("========================================");
-
     try {
-        // -----------------------------------------
-        // REDIS
-        // -----------------------------------------
-
-        console.log();
-
-        console.log("Conectando ao Redis...");
-
         await conectarRedis();
 
-        console.log("✅ Redis pronto para uso");
-
-        // -----------------------------------------
-        // MQTT
-        // -----------------------------------------
+        console.log("[OK] Redis conectado");
 
         conectarMQTT();
     } catch (erro) {
-        console.error();
-
-        console.error("❌ Falha ao iniciar Gateway");
-
-        console.error(erro.message);
+        console.log(`[ERRO] Redis: ${erro.message}`);
 
         process.exit(1);
     }
 }
 
 // =====================================================
-// ENCERRAMENTO
+// ENCERRAR
 // =====================================================
 
-process.on("SIGINT", () => {
-    console.log();
-
-    console.log("Encerrando Gateway...");
-
-    if (clienteMQTT) {
-        clienteMQTT.end();
+async function encerrarGateway() {
+    if (encerrando) {
+        return;
     }
 
+    encerrando = true;
+
+    console.log("Encerrando...");
+
+    terminal.close();
+
+    if (clienteMQTT) {
+        await new Promise((resolve) => {
+            clienteMQTT.end(false, {}, resolve);
+        });
+    }
+
+    await desconectarRedis();
+
     process.exit(0);
-});
+}
+
+process.on("SIGINT", encerrarGateway);
 
 // =====================================================
 // START
