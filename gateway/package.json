@@ -1,15 +1,19 @@
 {
     "name": "despertador-gateway",
     "version": "1.0.0",
-    "description": "Gateway MQTT e Redis do Despertador Inteligente",
+    "description": "Gateway MQTT, Redis e API do Despertador Inteligente",
     "main": "src/index.js",
     "scripts": {
         "start": "node src/index.js",
         "dev": "node --watch src/index.js",
+        "api": "node src/api.js",
+        "api:dev": "node --watch src/api.js",
         "redis:query": "node scripts/consultarRedis.js"
     },
     "dependencies": {
+        "cors": "^2.8.5",
         "dotenv": "^16.4.5",
+        "express": "^5.1.0",
         "mqtt": "^5.10.4",
         "redis": "^5.0.0"
     }
