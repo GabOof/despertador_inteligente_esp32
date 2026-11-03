@@ -74,7 +74,6 @@ Resultado esperado:
 
 ```text
 Wi-Fi conectado!
-
 IP: ...
 Gateway: ...
 RSSI: ... dBm
@@ -242,12 +241,9 @@ O arquivo `.env` deve possuir:
 ```env
 MQTT_HOST=SEU_BROKER
 MQTT_PORT=8883
-
 MQTT_USERNAME=SEU_USUARIO
 MQTT_PASSWORD=SUA_SENHA
-
 MQTT_CLIENT_ID=gateway-despertador-gab
-
 REDIS_URL=redis://localhost:6379
 ```
 
@@ -261,13 +257,10 @@ Resultado esperado:
 
 ```text
 Redis conectado com sucesso!
-
 GATEWAY MQTT CONECTADO!
-
 Topicos assinados:
 - despertador/gab/+/telemetria
 - despertador/gab/+/estado
-
 Aguardando mensagens...
 ```
 
@@ -275,10 +268,8 @@ Quando o ESP32 publicar uma telemetria:
 
 ```text
 NOVA MENSAGEM MQTT
-
 Dispositivo: esp32-01
 Tipo: telemetria
-
 MENSAGEM VALIDA
 Mensagem persistida no Redis
 ```
@@ -374,9 +365,80 @@ HISTORICO
 
 ---
 
+# 7. Executar a API
+
+A API foi desenvolvida em Node.js utilizando Express e é responsável por disponibilizar os dados armazenados no Redis para outras aplicações.
+
+A API permite consultar:
+
+- estado atual do dispositivo;
+- histórico de telemetria;
+- presença do dispositivo;
+- último contato;
+- status de comandos enviados;
+- envio de novos comandos para o ESP32.
+
+O arquivo principal é:
+
+```text
+gateway/src/api.js
+```
+
+Para executar a API:
+
+```bash
+cd gateway
+npm run api
+```
+
+A API ficará disponível em:
+
+```text
+http://localhost:3000
+```
+
+---
+
+## Executar o sistema completo
+
+Primeiro inicie o Redis:
+
+```bash
+docker start redis-despertador
+```
+
+Em um terminal, execute o Gateway:
+
+```bash
+cd gateway
+npm run gateway
+```
+
+O Gateway é responsável por:
+
+```text
+MQTT → Gateway → Redis
+```
+
+Em outro terminal, execute a API e o sistema web:
+
+```bash
+cd gateway
+npm run api
+```
+
+Depois abra no navegador:
+
+```text
+http://localhost:3000
+```
+
+---
+
 ## Autor
 
 **Gabrielle de Oliveira Fonseca**
+
 **0072379**
 
 Projeto acadêmico desenvolvido para a disciplina de **Tópicos Especiais em Robótica**.
