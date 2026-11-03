@@ -1,16 +1,28 @@
 require("dotenv").config();
 
+const path = require("path");
+
 const express = require("express");
+
 const cors = require("cors");
 
 const {
     conectarRedis,
     desconectarRedis,
     consultarEstado,
+    consultarTelemetriaAtual,
     consultarHistorico,
     consultarUltimoContato,
     consultarPresenca,
+    consultarComando,
 } = require("./redis");
+
+const {
+    iniciarPublicadorMQTT,
+    publicarComando,
+    mqttDisponivel,
+    encerrarPublicadorMQTT,
+} = require("./commandPublisher");
 
 // =====================================================
 // CONFIGURACAO
@@ -20,11 +32,19 @@ const app = express();
 
 const PORT = Number(process.env.API_PORT || 3000);
 
-// Permite futuramente chamadas do painel web
+// =====================================================
+// MIDDLEWARES
+// =====================================================
+
 app.use(cors());
 
-// Permite trabalhar com JSON
 app.use(express.json());
+
+// =====================================================
+// FRONTEND
+// =====================================================
+
+app.use(express.static(path.join(__dirname, "../public")));
 
 // =====================================================
 // FUNCOES AUXILIARES
@@ -34,51 +54,40 @@ function objetoVazio(objeto) {
     return !objeto || Object.keys(objeto).length === 0;
 }
 
-function tratarErroRedis(res, erro) {
-    console.error("Erro ao acessar Redis:", erro.message);
+function erroRedis(res, erro) {
+    console.error("[ERRO REDIS]", erro.message);
 
     return res.status(503).json({
         sucesso: false,
 
-        erro: "servico_indisponivel",
+        erro: "redis_indisponivel",
 
-        mensagem: "Nao foi possivel acessar o banco Redis.",
+        mensagem: "Nao foi possivel acessar o Redis.",
     });
 }
 
 // =====================================================
-// ROTA INICIAL
+// HEALTH
 // =====================================================
 
-app.get("/", (req, res) => {
-    res.status(200).json({
-        sucesso: true,
+app.get(
+    "/api/health",
 
-        projeto: "Despertador Inteligente",
+    (req, res) => {
+        return res.status(200).json({
+            sucesso: true,
 
-        servico: "API IoT",
+            api: "online",
 
-        versao: "1.0.0",
-    });
-});
+            mqtt: mqttDisponivel() ? "online" : "offline",
 
-// =====================================================
-// HEALTH CHECK
-// =====================================================
-
-app.get("/api/health", (req, res) => {
-    res.status(200).json({
-        sucesso: true,
-
-        status: "online",
-
-        timestamp: new Date().toISOString(),
-    });
-});
+            timestamp: new Date().toISOString(),
+        });
+    }
+);
 
 // =====================================================
 // ESTADO ATUAL
-// GET /api/devices/:deviceId/state
 // =====================================================
 
 app.get(
@@ -90,14 +99,15 @@ app.get(
         try {
             const estado = await consultarEstado(deviceId);
 
-            // Nenhum estado confirmado
-            if (objetoVazio(estado)) {
+            const telemetria = await consultarTelemetriaAtual(deviceId);
+
+            if (objetoVazio(estado) && objetoVazio(telemetria)) {
                 return res.status(404).json({
                     sucesso: false,
 
-                    erro: "estado_nao_encontrado",
+                    erro: "dispositivo_nao_encontrado",
 
-                    mensagem: `Nenhum estado confirmado encontrado para ${deviceId}.`,
+                    mensagem: "Nenhum dado encontrado para o dispositivo.",
                 });
             }
 
@@ -106,19 +116,18 @@ app.get(
 
                 deviceId,
 
-                estado,
+                estadoConfirmado: estado,
+
+                telemetriaAtual: telemetria,
             });
         } catch (erro) {
-            return tratarErroRedis(res, erro);
+            return erroRedis(res, erro);
         }
     }
 );
 
 // =====================================================
 // HISTORICO
-//
-// GET /api/devices/:deviceId/history
-// GET /api/devices/:deviceId/history?limit=20
 // =====================================================
 
 app.get(
@@ -127,11 +136,7 @@ app.get(
     async (req, res) => {
         const { deviceId } = req.params;
 
-        let limite = Number(req.query.limit || 10);
-
-        // ---------------------------------------------
-        // VALIDAR LIMIT
-        // ---------------------------------------------
+        const limite = Number(req.query.limit || 20);
 
         if (!Number.isInteger(limite) || limite < 1 || limite > 100) {
             return res.status(400).json({
@@ -139,7 +144,7 @@ app.get(
 
                 erro: "parametro_invalido",
 
-                mensagem: "O parametro limit deve ser um numero inteiro entre 1 e 100.",
+                mensagem: "limit deve ser um inteiro entre 1 e 100.",
             });
         }
 
@@ -150,9 +155,9 @@ app.get(
                 return res.status(404).json({
                     sucesso: false,
 
-                    erro: "historico_nao_encontrado",
+                    erro: "historico_vazio",
 
-                    mensagem: `Nenhuma telemetria encontrada para ${deviceId}.`,
+                    mensagem: "Nenhuma telemetria encontrada.",
                 });
             }
 
@@ -166,15 +171,13 @@ app.get(
                 historico,
             });
         } catch (erro) {
-            return tratarErroRedis(res, erro);
+            return erroRedis(res, erro);
         }
     }
 );
 
 // =====================================================
-// PRESENCA E ULTIMO CONTATO
-//
-// GET /api/devices/:deviceId/presence
+// PRESENCA
 // =====================================================
 
 app.get(
@@ -186,19 +189,13 @@ app.get(
         try {
             const ultimoContato = await consultarUltimoContato(deviceId);
 
-            /*
-                Se nunca houve contato,
-                provavelmente o dispositivo
-                nao existe no Redis.
-            */
-
             if (!ultimoContato) {
                 return res.status(404).json({
                     sucesso: false,
 
                     erro: "dispositivo_nao_encontrado",
 
-                    mensagem: `Nenhum registro encontrado para ${deviceId}.`,
+                    mensagem: "O dispositivo ainda nao possui registros.",
                 });
             }
 
@@ -214,33 +211,158 @@ app.get(
                 ultimoContato,
             });
         } catch (erro) {
-            return tratarErroRedis(res, erro);
+            return erroRedis(res, erro);
         }
     }
 );
 
 // =====================================================
-// ROTA NAO ENCONTRADA
+// ENVIAR COMANDO
+//
+// POST /api/devices/esp32-01/commands
+//
+// {
+//     "comando": "ligar_alarme"
+// }
 // =====================================================
 
-app.use((req, res) => {
-    res.status(404).json({
-        sucesso: false,
+app.post(
+    "/api/devices/:deviceId/commands",
 
-        erro: "rota_nao_encontrada",
+    async (req, res) => {
+        const { deviceId } = req.params;
 
-        mensagem: "O endpoint solicitado nao existe.",
-    });
-});
+        const { comando } = req.body;
+
+        const comandosPermitidos = ["ligar_alarme", "desligar_alarme", "automatico"];
+
+        if (!comando || typeof comando !== "string") {
+            return res.status(400).json({
+                sucesso: false,
+
+                erro: "comando_invalido",
+
+                mensagem: "Informe o comando.",
+            });
+        }
+
+        if (!comandosPermitidos.includes(comando)) {
+            return res.status(400).json({
+                sucesso: false,
+
+                erro: "comando_nao_suportado",
+
+                mensagem: "Comando nao suportado.",
+            });
+        }
+
+        if (!mqttDisponivel()) {
+            return res.status(503).json({
+                sucesso: false,
+
+                erro: "mqtt_indisponivel",
+
+                mensagem: "Nao foi possivel enviar o comando.",
+            });
+        }
+
+        try {
+            const resultado = await publicarComando(deviceId, comando);
+
+            /*
+                202 Accepted:
+
+                o comando foi aceito e
+                enviado, mas ainda nao
+                necessariamente executado.
+            */
+
+            return res.status(202).json({
+                sucesso: true,
+
+                mensagem: "Comando enviado. Aguardando confirmacao do ESP32.",
+
+                ...resultado,
+            });
+        } catch (erro) {
+            console.error("[ERRO COMANDO]", erro.message);
+
+            return res.status(503).json({
+                sucesso: false,
+
+                erro: "falha_envio",
+
+                mensagem: "Falha ao publicar o comando MQTT.",
+            });
+        }
+    }
+);
 
 // =====================================================
-// INICIAR API
+// CONSULTAR STATUS DO COMANDO
+//
+// GET
+// /api/devices/:deviceId/commands/:requestId
 // =====================================================
 
-async function iniciarAPI() {
+app.get(
+    "/api/devices/:deviceId/commands/:requestId",
+
+    async (req, res) => {
+        const { deviceId, requestId } = req.params;
+
+        try {
+            const comando = await consultarComando(deviceId, requestId);
+
+            if (objetoVazio(comando)) {
+                return res.status(404).json({
+                    sucesso: false,
+
+                    erro: "comando_nao_encontrado",
+
+                    mensagem: "O comando solicitado nao existe.",
+                });
+            }
+
+            return res.status(200).json({
+                sucesso: true,
+
+                deviceId,
+
+                comando,
+            });
+        } catch (erro) {
+            return erroRedis(res, erro);
+        }
+    }
+);
+
+// =====================================================
+// API 404
+// =====================================================
+
+app.use(
+    "/api",
+
+    (req, res) => {
+        return res.status(404).json({
+            sucesso: false,
+
+            erro: "rota_nao_encontrada",
+
+            mensagem: "Endpoint inexistente.",
+        });
+    }
+);
+
+// =====================================================
+// INICIAR
+// =====================================================
+
+async function iniciar() {
     console.clear();
 
-    console.log("Despertador Inteligente - API");
+    console.log("Despertador Inteligente");
 
     console.log();
 
@@ -249,44 +371,32 @@ async function iniciarAPI() {
 
         console.log("[OK] Redis conectado");
 
-        app.listen(PORT, () => {
-            console.log(`[OK] API executando na porta ${PORT}`);
+        iniciarPublicadorMQTT();
 
-            console.log();
+        app.listen(
+            PORT,
 
-            console.log("Endpoints:");
-
-            console.log(`GET /api/devices/:deviceId/state`);
-
-            console.log(`GET /api/devices/:deviceId/history`);
-
-            console.log(`GET /api/devices/:deviceId/presence`);
-
-            console.log();
-        });
+            () => {
+                console.log(`[OK] Web/API: http://localhost:${PORT}`);
+            }
+        );
     } catch (erro) {
-        console.error("[ERRO] Nao foi possivel iniciar a API");
-
-        console.error(erro.message);
+        console.error("[ERRO]", erro.message);
 
         process.exit(1);
     }
 }
 
 // =====================================================
-// ENCERRAMENTO
+// ENCERRAR
 // =====================================================
 
 async function encerrar() {
-    console.log();
+    console.log("Encerrando...");
 
-    console.log("Encerrando API...");
+    await encerrarPublicadorMQTT();
 
-    try {
-        await desconectarRedis();
-    } catch (erro) {
-        console.error(erro.message);
-    }
+    await desconectarRedis();
 
     process.exit(0);
 }
@@ -299,4 +409,4 @@ process.on("SIGTERM", encerrar);
 // START
 // =====================================================
 
-iniciarAPI();
+iniciar();
