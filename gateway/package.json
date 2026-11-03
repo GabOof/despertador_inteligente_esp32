@@ -1,11 +1,12 @@
 {
     "name": "despertador-gateway",
     "version": "1.0.0",
-    "description": "Gateway MQTT, Redis e API do Despertador Inteligente",
+    "description": "Sistema IoT do Despertador Inteligente",
     "main": "src/index.js",
     "scripts": {
         "start": "node src/index.js",
-        "dev": "node --watch src/index.js",
+        "gateway": "node src/index.js",
+        "gateway:dev": "node --watch src/index.js",
         "api": "node src/api.js",
         "api:dev": "node --watch src/api.js",
         "redis:query": "node scripts/consultarRedis.js"
