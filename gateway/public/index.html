@@ -1,0 +1,115 @@
+<!doctype html>
+
+<html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8" />
+
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+        <title>Despertador Inteligente</title>
+
+        <link rel="stylesheet" href="/style.css" />
+    </head>
+
+    <body>
+        <header>
+            <div>
+                <span class="subtitle"> SISTEMA IoT </span>
+
+                <h1>Despertador Inteligente</h1>
+
+                <p>Monitoramento e controle do ESP32</p>
+            </div>
+
+            <div id="connectionStatus" class="connection">Conectando...</div>
+        </header>
+
+        <main>
+            <!-- ===================================== -->
+            <!-- STATUS -->
+            <!-- ===================================== -->
+
+            <section class="cards">
+                <article class="card">
+                    <span class="label"> Dispositivo </span>
+
+                    <strong id="presence"> -- </strong>
+
+                    <small id="lastSeen"> Último contato: -- </small>
+                </article>
+
+                <article class="card">
+                    <span class="label"> Movimento </span>
+
+                    <strong id="movement"> -- </strong>
+
+                    <small> Sensor PIR </small>
+                </article>
+
+                <article class="card">
+                    <span class="label"> Alarme </span>
+
+                    <strong id="alarm"> -- </strong>
+
+                    <small id="alarmMode"> Modo: -- </small>
+                </article>
+
+                <article class="card">
+                    <span class="label"> Sinal Wi-Fi </span>
+
+                    <strong id="rssi"> -- </strong>
+
+                    <small> RSSI </small>
+                </article>
+            </section>
+
+            <!-- ===================================== -->
+            <!-- CONTROLE -->
+            <!-- ===================================== -->
+
+            <section class="panel">
+                <div class="panel-header">
+                    <div>
+                        <span class="subtitle"> CONTROLE REMOTO </span>
+
+                        <h2>Alarme</h2>
+                    </div>
+                </div>
+
+                <div class="controls">
+                    <button id="btnTurnOn" class="button primary">Ligar alarme</button>
+
+                    <button id="btnTurnOff" class="button danger">Desligar alarme</button>
+
+                    <button id="btnAutomatic" class="button secondary">Modo automático</button>
+                </div>
+
+                <div id="commandStatus" class="command-status">Nenhum comando enviado.</div>
+            </section>
+
+            <!-- ===================================== -->
+            <!-- HISTORICO -->
+            <!-- ===================================== -->
+
+            <section class="panel">
+                <div class="panel-header">
+                    <div>
+                        <span class="subtitle"> TELEMETRIA </span>
+
+                        <h2>Histórico recente</h2>
+                    </div>
+
+                    <button id="btnRefresh" class="button small">Atualizar</button>
+                </div>
+
+                <div id="history" class="history">
+                    <p class="empty">Carregando histórico...</p>
+                </div>
+            </section>
+        </main>
+
+        <footer>ESP32 • MQTT • Node.js • Redis</footer>
+
+        <script src="/app.js"></script>
+    </body>
+</html>
