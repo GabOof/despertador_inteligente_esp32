@@ -1,397 +1,205 @@
-# Despertador Inteligente com Sensor de Movimento
+# Despertador Inteligente IoT
 
-Projeto desenvolvido na disciplina de **Tópicos Especiais em Robótica**, utilizando um **ESP32** integrado a Wi-Fi, MQTT, Gateway Node.js e Redis.
+Projeto desenvolvido na disciplina de **Tópicos Especiais em Robótica**.
 
-O sistema utiliza um sensor PIR para detectar movimento, LEDs para sinalização e um buzzer como alarme. O ESP32 publica telemetria via MQTT e recebe comandos remotos.
+O sistema utiliza um **ESP32** com sensor PIR, LEDs e buzzer, integrado a uma arquitetura IoT com **Wi-Fi, MQTT, Node.js, Redis e interface web**.
 
----
-
-## Hardware
-
-### Componentes
-
-- ESP32 DevKit V1;
-- sensor PIR HC-SR501;
-- buzzer passivo;
-- LED verde;
-- LED vermelho;
-- resistores;
-- diodo;
-- capacitor;
-- protoboard;
-- jumpers;
-- cabo USB.
-
-### Pinagem
-
-| Componente   | GPIO |
-| ------------ | ---: |
-| PIR HC-SR501 |   27 |
-| LED verde    |   25 |
-| LED vermelho |   32 |
-| Buzzer       |   12 |
+O objetivo é permitir o monitoramento do dispositivo e o controle remoto do alarme.
 
 ---
 
-# 1. Teste de Wi-Fi
+# Hardware
 
-O arquivo:
+| Componente          | GPIO |
+| ------------------- | ---: |
+| Sensor PIR HC-SR501 |   27 |
+| LED verde           |   25 |
+| LED vermelho        |   32 |
+| Buzzer passivo      |   12 |
+
+O protótipo também utiliza protoboard, resistores, jumpers, capacitor, diodo e cabo USB.
+
+---
+
+# 1. Firmware do ESP32
+
+O firmware está em:
 
 ```text
-wifi/wifi_connection.ino
+firmware/despertador.ino
 ```
 
-é utilizado para testar:
+Ele é responsável por:
 
-- conexão do ESP32 ao Wi-Fi;
-- endereço IP;
-- gateway;
-- RSSI;
-- perda de conexão;
-- reconexão automática.
+- conexão Wi-Fi;
+- conexão MQTT;
+- leitura do sensor PIR;
+- controle dos LEDs;
+- controle do buzzer;
+- envio de telemetria;
+- recebimento de comandos;
+- confirmação dos comandos;
+- modo automático.
 
-Abra o arquivo na Arduino IDE e configure:
+---
 
-```cpp
-const char* ssid = "SEU_WIFI";
-const char* senha = "SUA_SENHA";
+## Configurar credenciais
+
+Crie:
+
+```text
+firmware/secrets.h
 ```
 
-Selecione:
+---
+
+## Enviar firmware
+
+Na Arduino IDE:
 
 ```text
 Board: ESP32 Dev Module
-Port: porta serial do ESP32
+Serial: 115200 baud
 ```
 
-Faça o upload e abra o Monitor Serial em:
+Faça o upload de:
 
 ```text
-115200 baud
+firmware/despertador.ino
 ```
 
 Resultado esperado:
 
 ```text
-Wi-Fi conectado!
-IP: ...
-Gateway: ...
-RSSI: ... dBm
+Despertador iniciado
+[OK] MQTT conectado
 ```
 
 ---
 
-# 2. Executar o firmware MQTT
+# 2. MQTT
 
-O firmware principal está em:
-
-```text
-mqtt/mqtt_connection.ino
-```
-
-Ele implementa:
-
-- leitura do PIR;
-- controle dos LEDs;
-- buzzer;
-- conexão Wi-Fi;
-- HiveMQ Cloud;
-- publicação de telemetria;
-- recebimento de comandos;
-- modo automático.
-
-Configure suas credenciais de Wi-Fi e MQTT antes de fazer o upload.
-
-Após o upload, abra o Monitor Serial:
-
-```text
-115200 baud
-```
-
-O ESP32 deverá informar:
-
-```text
-Wi-Fi conectado!
-MQTT conectado!
-Inscrito no topico de comandos.
-```
-
----
-
-## Tópicos MQTT
-
-### Telemetria
-
-```text
-despertador/gab/esp32-01/telemetria
-```
-
-Exemplo:
-
-```json
-{
-    "movimento": true,
-    "ledVerde": true,
-    "ledVermelho": false,
-    "alarmeAtivo": false,
-    "modoAutomatico": false,
-    "pausaMovimento": false,
-    "rssi": -55
-}
-```
-
-### Comandos
-
-```text
-despertador/gab/esp32-01/comando
-```
-
-Ligar alarme:
-
-```json
-{ "comando": "ligar_alarme" }
-```
-
-Desligar alarme:
-
-```json
-{ "comando": "desligar_alarme" }
-```
-
-Ativar modo automático:
-
-```json
-{ "comando": "automatico" }
-```
-
-No modo automático, o buzzer toca até detectar movimento. Após a detecção, o buzzer é pausado temporariamente antes de voltar a tocar.
-
-### Estado
-
-```text
-despertador/gab/esp32-01/estado
-```
-
-Exemplo:
-
-```json
-{
-    "alarmeAtivo": false,
-    "modoAutomatico": true,
-    "pausaMovimento": true
-}
-```
-
----
-
-# 3. Iniciar o Redis
-
-O Redis é utilizado para armazenar:
-
-- estado atual;
-- histórico de telemetria;
-- último contato;
-- presença do dispositivo.
-
-Para iniciar o container:
-
-```bash
-docker start redis-despertador
-```
-
-Caso ainda não exista:
-
-```bash
-docker run -d \
-  --name redis-despertador \
-  -p 6379:6379 \
-  redis:7-alpine
-```
-
-Teste a conexão:
-
-```bash
-docker exec redis-despertador redis-cli PING
-```
-
-Resultado esperado:
-
-```text
-PONG
-```
-
----
-
-# 4. Executar o Gateway Node.js
-
-Entre na pasta:
-
-```bash
-cd gateway
-```
-
-Instale as dependências:
-
-```bash
-npm install
-```
-
-O arquivo `.env` deve possuir:
-
-```env
-MQTT_HOST=SEU_BROKER
-MQTT_PORT=8883
-MQTT_USERNAME=SEU_USUARIO
-MQTT_PASSWORD=SUA_SENHA
-MQTT_CLIENT_ID=gateway-despertador-gab
-REDIS_URL=redis://localhost:6379
-```
-
-Execute:
-
-```bash
-npm start
-```
-
-Resultado esperado:
-
-```text
-Redis conectado com sucesso!
-GATEWAY MQTT CONECTADO!
-Topicos assinados:
-- despertador/gab/+/telemetria
-- despertador/gab/+/estado
-Aguardando mensagens...
-```
-
-Quando o ESP32 publicar uma telemetria:
-
-```text
-NOVA MENSAGEM MQTT
-Dispositivo: esp32-01
-Tipo: telemetria
-MENSAGEM VALIDA
-Mensagem persistida no Redis
-```
-
----
-
-# 5. Estrutura das chaves Redis
-
-O dispositivo é identificado como:
+O dispositivo utilizado no projeto é:
 
 ```text
 esp32-01
 ```
 
-As principais chaves são:
-
-```text
-iot:device:esp32-01:state
-iot:device:esp32-01:history
-iot:device:esp32-01:lastSeen
-iot:device:esp32-01:presence
-```
-
-Onde:
-
-```text
-state
-→ estado atual
-
-history
-→ histórico de telemetria
-
-lastSeen
-→ último contato
-
-presence
-→ online/offline
-```
-
 ---
 
-# 6. Consultar os dados no Redis
+# 3. Redis
 
-Abra o Redis CLI:
+O Redis armazena:
+
+- última telemetria;
+- histórico;
+- estado confirmado;
+- último contato;
+- presença;
+- situação dos comandos.
+
+Para iniciar:
 
 ```bash
-docker exec -it redis-despertador redis-cli
-```
-
-Estado atual:
-
-```redis
-HGETALL iot:device:esp32-01:state
-```
-
-Histórico:
-
-```redis
-LRANGE iot:device:esp32-01:history 0 -1
-```
-
-Último contato:
-
-```redis
-GET iot:device:esp32-01:lastSeen
-```
-
-Presença:
-
-```redis
-GET iot:device:esp32-01:presence
+docker compose up -d
 ```
 
 ---
 
-## Consulta pelo Node.js
+# 4. Backend Node.js
 
-Também é possível consultar tudo utilizando:
-
-```bash
-cd gateway
-npm run redis:query
-```
-
-O comando apresenta:
+O backend está em:
 
 ```text
-ESTADO ATUAL
-ULTIMO CONTATO
-PRESENCA
-HISTORICO
+backend/server.js
+```
+
+Ele reúne:
+
+- Gateway MQTT;
+- integração com Redis;
+- API REST;
+- envio de comandos;
+- recebimento das confirmações do ESP32;
+- disponibilização do sistema web.
+
+---
+
+## Configurar `.env`
+
+Crie:
+
+```text
+backend/.env
 ```
 
 ---
 
-# 7. Executar a API
+## Instalar dependências
 
-A API foi desenvolvida em Node.js utilizando Express e é responsável por disponibilizar os dados armazenados no Redis para outras aplicações.
+```bash
+cd backend
+npm install
+```
 
-A API permite consultar:
+---
 
-- estado atual do dispositivo;
-- histórico de telemetria;
+## Executar
+
+```bash
+npm start
+```
+
+---
+
+# 5. Sistema Web
+
+O frontend está em:
+
+```text
+backend/public/index.html
+```
+
+Para acessar:
+
+```text
+http://localhost:3000
+```
+
+A interface apresenta:
+
 - presença do dispositivo;
 - último contato;
-- status de comandos enviados;
-- envio de novos comandos para o ESP32.
+- estado do sensor PIR;
+- estado do alarme;
+- sinal Wi-Fi;
+- histórico de telemetria;
+- botão para ligar o alarme;
+- botão para desligar o alarme;
+- botão para ativar o modo automático.
 
-O arquivo principal é:
+A página é atualizada automaticamente a partir dos dados armazenados no Redis.
 
-```text
-gateway/src/api.js
-```
+---
 
-Para executar a API:
+# 6. Como executar o projeto completo
+
+Primeiro:
 
 ```bash
-cd gateway
-npm run api
+docker compose up -d
 ```
 
-A API ficará disponível em:
+Depois conecte o ESP32 com o firmware carregado.
+
+Em seguida:
+
+```bash
+cd backend
+npm start
+```
+
+Por fim, abra:
 
 ```text
 http://localhost:3000
@@ -399,43 +207,7 @@ http://localhost:3000
 
 ---
 
-## Executar o sistema completo
-
-Primeiro inicie o Redis:
-
-```bash
-docker start redis-despertador
-```
-
-Em um terminal, execute o Gateway:
-
-```bash
-cd gateway
-npm run gateway
-```
-
-O Gateway é responsável por:
-
-```text
-MQTT → Gateway → Redis
-```
-
-Em outro terminal, execute a API e o sistema web:
-
-```bash
-cd gateway
-npm run api
-```
-
-Depois abra no navegador:
-
-```text
-http://localhost:3000
-```
-
----
-
-## Autor
+# Autor
 
 **Gabrielle de Oliveira Fonseca**
 
