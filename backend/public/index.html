@@ -1,0 +1,366 @@
+<!doctype html>
+
+<html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8" />
+
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+        <title>Despertador Inteligente</title>
+
+        <style>
+            body {
+                margin: 0;
+                font-family: Arial, sans-serif;
+                background: #f4f6f8;
+                color: #222;
+            }
+
+            header {
+                background: white;
+                padding: 25px;
+                border-bottom: 1px solid #ddd;
+            }
+
+            header h1 {
+                margin: 0;
+            }
+
+            main {
+                max-width: 1000px;
+                margin: auto;
+                padding: 25px;
+            }
+
+            .cards {
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 15px;
+            }
+
+            .card,
+            section {
+                background: white;
+                border-radius: 10px;
+                padding: 20px;
+                margin-bottom: 20px;
+            }
+
+            .card span {
+                color: #666;
+                font-size: 13px;
+            }
+
+            .card strong {
+                display: block;
+                font-size: 23px;
+                margin-top: 10px;
+            }
+
+            button {
+                border: 0;
+                padding: 12px 18px;
+                border-radius: 7px;
+                cursor: pointer;
+                margin-right: 8px;
+            }
+
+            .ligar {
+                background: #2176ff;
+                color: white;
+            }
+
+            .desligar {
+                background: #dc3545;
+                color: white;
+            }
+
+            .automatico {
+                background: #ddd;
+            }
+
+            #mensagem {
+                margin-top: 15px;
+                font-weight: bold;
+            }
+
+            table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+
+            td,
+            th {
+                padding: 10px;
+                text-align: left;
+                border-bottom: 1px solid #ddd;
+            }
+
+            .online {
+                color: green;
+            }
+
+            .offline {
+                color: red;
+            }
+
+            @media (max-width: 700px) {
+                .cards {
+                    grid-template-columns: 1fr 1fr;
+                }
+            }
+        </style>
+    </head>
+
+    <body>
+        <header>
+            <h1>Despertador Inteligente</h1>
+
+            <p>Monitoramento e controle IoT</p>
+        </header>
+
+        <main>
+            <div class="cards">
+                <div class="card">
+                    <span> Dispositivo </span>
+
+                    <strong id="presenca"> -- </strong>
+
+                    <small id="ultimoContato"> -- </small>
+                </div>
+
+                <div class="card">
+                    <span> Movimento </span>
+
+                    <strong id="movimento"> -- </strong>
+                </div>
+
+                <div class="card">
+                    <span> Alarme </span>
+
+                    <strong id="alarme"> -- </strong>
+                </div>
+
+                <div class="card">
+                    <span> Wi-Fi </span>
+
+                    <strong id="rssi"> -- </strong>
+                </div>
+            </div>
+
+            <section>
+                <h2>Controle</h2>
+
+                <button class="ligar" onclick="enviar('ligar_alarme')">Ligar</button>
+
+                <button class="desligar" onclick="enviar('desligar_alarme')">Desligar</button>
+
+                <button class="automatico" onclick="enviar('automatico')">Automático</button>
+
+                <div id="mensagem"></div>
+            </section>
+
+            <section>
+                <h2>Histórico</h2>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Horário</th>
+                            <th>Movimento</th>
+                            <th>Alarme</th>
+                            <th>RSSI</th>
+                        </tr>
+                    </thead>
+
+                    <tbody id="historico"></tbody>
+                </table>
+            </section>
+        </main>
+
+        <script>
+            const DEVICE = "esp32-01";
+
+            // =====================================================
+            // ESTADO
+            // =====================================================
+
+            async function carregarEstado() {
+                try {
+                    const resposta = await fetch(`/api/devices/${DEVICE}/state`);
+
+                    if (!resposta.ok) return;
+
+                    const dados = await resposta.json();
+
+                    const telemetria = dados.telemetria || {};
+
+                    const estado = dados.estado || {};
+
+                    document.getElementById("movimento").textContent = telemetria.movimento
+                        ? "Detectado"
+                        : "Sem movimento";
+
+                    document.getElementById("alarme").textContent = estado.alarmeAtivo
+                        ? "Ligado"
+                        : "Desligado";
+
+                    document.getElementById("rssi").textContent =
+                        telemetria.rssi !== undefined ? `${telemetria.rssi} dBm` : "--";
+                } catch {}
+            }
+
+            // =====================================================
+            // PRESENCA
+            // =====================================================
+
+            async function carregarPresenca() {
+                try {
+                    const resposta = await fetch(`/api/devices/${DEVICE}/presence`);
+
+                    if (!resposta.ok) return;
+
+                    const dados = await resposta.json();
+
+                    const elemento = document.getElementById("presenca");
+
+                    elemento.textContent = dados.presenca;
+
+                    elemento.className = dados.presenca === "online" ? "online" : "offline";
+
+                    document.getElementById("ultimoContato").textContent = new Date(
+                        dados.ultimoContato
+                    ).toLocaleString();
+                } catch {}
+            }
+
+            // =====================================================
+            // HISTORICO
+            // =====================================================
+
+            async function carregarHistorico() {
+                try {
+                    const resposta = await fetch(`/api/devices/${DEVICE}/history?limit=10`);
+
+                    if (!resposta.ok) return;
+
+                    const dados = await resposta.json();
+
+                    const tabela = document.getElementById("historico");
+
+                    tabela.innerHTML = "";
+
+                    dados.historico.forEach((item) => {
+                        tabela.innerHTML += `
+                    <tr>
+
+                        <td>
+                            ${new Date(item.recebidoEm).toLocaleTimeString()}
+                        </td>
+
+                        <td>
+                            ${item.movimento ? "Sim" : "Não"}
+                        </td>
+
+                        <td>
+                            ${item.alarmeAtivo ? "Ligado" : "Desligado"}
+                        </td>
+
+                        <td>
+                            ${item.rssi} dBm
+                        </td>
+
+                    </tr>
+                `;
+                    });
+                } catch {}
+            }
+
+            // =====================================================
+            // ENVIAR COMANDO
+            // =====================================================
+
+            async function enviar(comando) {
+                const mensagem = document.getElementById("mensagem");
+
+                mensagem.textContent = "Enviando comando...";
+
+                try {
+                    const resposta = await fetch(`/api/devices/${DEVICE}/commands`, {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+
+                        body: JSON.stringify({
+                            comando,
+                        }),
+                    });
+
+                    if (!resposta.ok) {
+                        mensagem.textContent = "Erro ao enviar comando.";
+
+                        return;
+                    }
+
+                    const dados = await resposta.json();
+
+                    mensagem.textContent = "Enviado. Aguardando ESP32...";
+
+                    esperarConfirmacao(dados.requestId);
+                } catch {
+                    mensagem.textContent = "Erro de comunicação.";
+                }
+            }
+
+            // =====================================================
+            // ESPERAR CONFIRMACAO
+            // =====================================================
+
+            async function esperarConfirmacao(requestId) {
+                const mensagem = document.getElementById("mensagem");
+
+                for (let tentativa = 0; tentativa < 15; tentativa++) {
+                    await new Promise((resolve) => setTimeout(resolve, 700));
+
+                    const resposta = await fetch(`/api/devices/${DEVICE}/commands/${requestId}`);
+
+                    if (!resposta.ok) continue;
+
+                    const dados = await resposta.json();
+
+                    if (dados.status === "confirmado") {
+                        mensagem.textContent = "Comando confirmado pelo ESP32.";
+
+                        atualizar();
+
+                        return;
+                    }
+
+                    if (dados.status === "rejeitado") {
+                        mensagem.textContent = "Comando rejeitado.";
+
+                        return;
+                    }
+                }
+
+                mensagem.textContent = "ESP32 não confirmou o comando.";
+            }
+
+            // =====================================================
+            // ATUALIZAR TELA
+            // =====================================================
+
+            function atualizar() {
+                carregarEstado();
+                carregarPresenca();
+                carregarHistorico();
+            }
+
+            atualizar();
+
+            setInterval(atualizar, 5000);
+        </script>
+    </body>
+</html>
