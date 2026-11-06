@@ -1,0 +1,16 @@
+{
+    "name": "despertador-iot",
+    "version": "1.0.0",
+    "description": "Backend do Despertador Inteligente IoT",
+    "main": "server.js",
+    "scripts": {
+        "start": "node server.js",
+        "dev": "node --watch server.js"
+    },
+    "dependencies": {
+        "dotenv": "^16.4.5",
+        "express": "^5.1.0",
+        "mqtt": "^5.10.4",
+        "redis": "^5.0.0"
+    }
+}
