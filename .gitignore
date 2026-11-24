@@ -2,3 +2,4 @@ node_modules/
 .env
 gateway/logs/*.log
 */secrets.h
+backend/logs
